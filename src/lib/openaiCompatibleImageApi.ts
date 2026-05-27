@@ -19,6 +19,19 @@ import {
 } from './imageApiShared'
 
 const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+const MIN_LONG_RUNNING_OPENAI_TIMEOUT_SECONDS = 300
+
+function getLongRunningOpenAITimeoutMs(profile: Pick<ApiProfile, 'timeout'>): number {
+  return Math.max(profile.timeout, MIN_LONG_RUNNING_OPENAI_TIMEOUT_SECONDS) * 1000
+}
+
+function shouldStreamOpenAIImageRequest(profile: ApiProfile, customProvider?: CustomProviderDefinition | null): boolean {
+  return profile.streamImages || (!customProvider && profile.provider === 'openai')
+}
+
+function getOpenAIImagePartialImages(profile: ApiProfile): number {
+  return Math.max(getStreamPartialImages(profile), 3)
+}
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
@@ -480,7 +493,7 @@ export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile
 
 async function callImagesApi(opts: CallApiOptions, profile: ApiProfile, customProvider?: CustomProviderDefinition | null): Promise<CallApiResult> {
   const n = opts.params.n > 0 ? opts.params.n : 1
-  if ((profile.codexCli || (profile.streamImages && n > 1)) && n > 1) {
+  if ((profile.codexCli || (shouldStreamOpenAIImageRequest(profile, customProvider) && n > 1)) && n > 1) {
     return callImagesApiConcurrent(opts, profile, n, customProvider)
   }
 
@@ -544,7 +557,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile, cu
   const paths = createOpenAICompatiblePaths(customProvider)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
+  const timeoutId = setTimeout(() => controller.abort(), getLongRunningOpenAITimeoutMs(profile))
 
   try {
     let response: Response
@@ -570,9 +583,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile, cu
       if (profile.responseFormatB64Json) {
         formData.append('response_format', 'b64_json')
       }
-      if (profile.streamImages) {
+      if (shouldStreamOpenAIImageRequest(profile, customProvider)) {
         formData.append('stream', 'true')
-        formData.append('partial_images', String(getStreamPartialImages(profile)))
+        formData.append('partial_images', String(getOpenAIImagePartialImages(profile)))
       }
 
       const imageBlobs: Blob[] = []
@@ -632,9 +645,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile, cu
       if (profile.responseFormatB64Json) {
         body.response_format = 'b64_json'
       }
-      if (profile.streamImages) {
+      if (shouldStreamOpenAIImageRequest(profile, customProvider)) {
         body.stream = true
-        body.partial_images = getStreamPartialImages(profile)
+        body.partial_images = getOpenAIImagePartialImages(profile)
       }
 
       response = await fetch(buildApiUrl(profile.baseUrl, paths.generationPath, proxyConfig, useApiProxy), {
@@ -653,7 +666,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile, cu
       throw new Error(await getApiErrorMessage(response))
     }
 
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (shouldStreamOpenAIImageRequest(profile, customProvider) && isEventStreamResponse(response)) {
       return parseImagesApiStreamResponse(response, mime, opts.onPartialImage)
     }
 
@@ -1005,7 +1018,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
   const requestHeaders = createRequestHeaders(profile)
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
+  const timeoutId = setTimeout(() => controller.abort(), getLongRunningOpenAITimeoutMs(profile))
 
   try {
     if (opts.maskDataUrl) {
