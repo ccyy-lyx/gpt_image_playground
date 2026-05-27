@@ -1590,16 +1590,19 @@ function failOpenAITaskIfStillRunning(taskId: string, error: string, now = Date.
   return true
 }
 
+const MIN_OPENAI_WATCHDOG_TIMEOUT_SECONDS = 300
+
 function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number, profile?: TimeoutStreamingHintProfile | null) {
   clearOpenAIWatchdogTimer(taskId)
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !isRunningOpenAITask(task)) return
 
-  const timeoutMs = Math.max(0, timeoutSeconds * 1000)
+  const effectiveTimeoutSeconds = Math.max(timeoutSeconds, MIN_OPENAI_WATCHDOG_TIMEOUT_SECONDS)
+  const timeoutMs = Math.max(0, effectiveTimeoutSeconds * 1000)
   const remainingMs = Math.max(0, timeoutMs - (Date.now() - task.createdAt))
   const timer = setTimeout(() => {
     openAIWatchdogTimers.delete(taskId)
-    const failed = failOpenAITaskIfStillRunning(taskId, createOpenAITimeoutError(timeoutSeconds, profile))
+    const failed = failOpenAITaskIfStillRunning(taskId, createOpenAITimeoutError(effectiveTimeoutSeconds, profile))
     if (failed) useStore.getState().showToast('OpenAI 任务请求超时', 'error')
   }, remainingMs)
   openAIWatchdogTimers.set(taskId, timer)

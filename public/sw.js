@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
+const CACHE_NAME = 'gpt-image-playground-v0.4.6-direct-api-20260527b'
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -27,7 +27,7 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'reload' })
         .then((response) => {
           const copy = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy))
@@ -42,7 +42,11 @@ self.addEventListener('fetch', (event) => {
     caches.match(request).then((cached) => {
       if (cached) return cached
 
-      return fetch(request).then((response) => {
+      const fetchRequest = url.pathname.startsWith('/assets/')
+        ? new Request(request, { cache: 'reload' })
+        : request
+
+      return fetch(fetchRequest).then((response) => {
         if (response.ok) {
           const copy = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
